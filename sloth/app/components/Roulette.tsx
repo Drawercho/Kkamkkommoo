@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
+import type { Slice } from "./SliceEditor";
 
 const UGLY_COLORS = [
   "#FF00FF", "#00FF00", "#FF6600", "#0000FF",
@@ -10,16 +11,17 @@ const UGLY_COLORS = [
 ];
 
 interface RouletteProps {
-  slices: string[];
+  slices: Slice[];
 }
 
 export default function Roulette({ slices }: RouletteProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [spinning, setSpinning] = useState(false);
-  const [rotation, setRotation] = useState(0);
   const [result, setResult] = useState<string | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const rotationRef = useRef(0);
+
+  const totalWeight = slices.reduce((s, x) => s + Math.max(0, x.weight), 0);
 
   const drawWheel = useCallback((rot: number) => {
     const canvas = canvasRef.current;
@@ -30,11 +32,10 @@ export default function Roulette({ slices }: RouletteProps) {
     const cy = canvas.height / 2;
     const radius = cx - 10;
     const n = slices.length;
-    const arc = (2 * Math.PI) / n;
+    const total = totalWeight > 0 ? totalWeight : n;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // outer ugly border
     ctx.beginPath();
     ctx.arc(cx, cy, radius + 8, 0, 2 * Math.PI);
     ctx.strokeStyle = "#FF00FF";
@@ -46,9 +47,15 @@ export default function Roulette({ slices }: RouletteProps) {
     ctx.lineWidth = 4;
     ctx.stroke();
 
+    let acc = 0;
     for (let i = 0; i < n; i++) {
-      const startAngle = rot + i * arc;
-      const endAngle = rot + (i + 1) * arc;
+      const w = Math.max(0, slices[i].weight);
+      const arc = (w / total) * 2 * Math.PI;
+      const startAngle = rot + acc;
+      const endAngle = rot + acc + arc;
+      acc += arc;
+
+      if (arc <= 0) continue;
 
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -68,12 +75,13 @@ export default function Roulette({ slices }: RouletteProps) {
       ctx.font = "bold 14px 'Comic Sans MS', cursive";
       ctx.strokeStyle = "#FFFFFF";
       ctx.lineWidth = 3;
-      ctx.strokeText(slices[i], radius - 10, 5);
-      ctx.fillText(slices[i], radius - 10, 5);
+      const pct = total > 0 ? Math.round((w / total) * 100) : 0;
+      const text = `${slices[i].label} (${pct}%)`;
+      ctx.strokeText(text, radius - 10, 5);
+      ctx.fillText(text, radius - 10, 5);
       ctx.restore();
     }
 
-    // center circle
     ctx.beginPath();
     ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
     ctx.fillStyle = "#FF0000";
@@ -81,46 +89,65 @@ export default function Roulette({ slices }: RouletteProps) {
     ctx.strokeStyle = "#FFFF00";
     ctx.lineWidth = 3;
     ctx.stroke();
-  }, [slices]);
+  }, [slices, totalWeight]);
 
   useEffect(() => {
     drawWheel(rotationRef.current);
   }, [drawWheel]);
 
+  const pickIndexByWeight = (): number => {
+    const total = totalWeight;
+    if (total <= 0) return Math.floor(Math.random() * slices.length);
+    const r = Math.random() * total;
+    let acc = 0;
+    for (let i = 0; i < slices.length; i++) {
+      acc += Math.max(0, slices[i].weight);
+      if (r < acc) return i;
+    }
+    return slices.length - 1;
+  };
+
   const spin = () => {
     if (spinning) return;
+    if (totalWeight <= 0) return;
     setResult(null);
     setSpinning(true);
 
-    const extraSpins = 5 + Math.random() * 5;
-    const extraAngle = Math.random() * 2 * Math.PI;
-    const totalRotation = extraSpins * 2 * Math.PI + extraAngle;
-    const duration = 3000 + Math.random() * 1000;
-    const startTime = performance.now();
+    const total = totalWeight;
+    const targetIdx = pickIndexByWeight();
+    let acc = 0;
+    for (let i = 0; i < targetIdx; i++) acc += Math.max(0, slices[i].weight);
+    const targetArc = (Math.max(0, slices[targetIdx].weight) / total) * 2 * Math.PI;
+    // random offset within the slice (leave small margin from edges)
+    const margin = targetArc * 0.15;
+    const withinSlice = margin + Math.random() * (targetArc - 2 * margin);
+    const targetAngleInWheel = (acc / total) * 2 * Math.PI + withinSlice;
+
+    const pointerAngle = -Math.PI / 2;
     const startRot = rotationRef.current;
+    const extraSpins = 5 + Math.floor(Math.random() * 4);
+    const baseFinalRot = pointerAngle - targetAngleInWheel;
+    const minFinal = startRot + extraSpins * 2 * Math.PI;
+    const twoPi = 2 * Math.PI;
+    let finalRot = baseFinalRot;
+    while (finalRot < minFinal) finalRot += twoPi;
+
+    const duration = 3500 + Math.random() * 1000;
+    const startTime = performance.now();
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      // ease-out cubic
       const eased = 1 - Math.pow(1 - progress, 3);
-      const currentRot = startRot + totalRotation * eased;
+      const currentRot = startRot + (finalRot - startRot) * eased;
       rotationRef.current = currentRot;
-      setRotation(currentRot);
       drawWheel(currentRot);
 
       if (progress < 1) {
         animFrameRef.current = requestAnimationFrame(animate);
       } else {
         setSpinning(false);
-        const n = slices.length;
-        const arc = (2 * Math.PI) / n;
-        // pointer is at top (-PI/2), normalize angle
-        const normalized = ((currentRot % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-        // pointer at top means angle 0 from top = -PI/2 in canvas coords
-        const pointerAngle = ((-Math.PI / 2 - normalized) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-        const idx = Math.floor(pointerAngle / arc) % n;
-        setResult(slices[idx]);
+        setResult(slices[targetIdx].label);
       }
     };
     animFrameRef.current = requestAnimationFrame(animate);
@@ -135,7 +162,6 @@ export default function Roulette({ slices }: RouletteProps) {
   return (
     <div className="flex flex-col items-center gap-4">
       <div className="relative" style={{ filter: "drop-shadow(0 0 12px #FF00FF) drop-shadow(0 0 6px #00FF00)" }}>
-        {/* pointer */}
         <div
           className="absolute left-1/2 z-10"
           style={{
@@ -159,11 +185,11 @@ export default function Roulette({ slices }: RouletteProps) {
 
       <button
         onClick={spin}
-        disabled={spinning}
+        disabled={spinning || totalWeight <= 0}
         className="px-8 py-3 text-2xl font-bold uppercase tracking-widest cursor-pointer"
         style={{
           fontFamily: "'Comic Sans MS', cursive",
-          background: spinning ? "#888" : "linear-gradient(135deg, #FF00FF, #FFFF00, #00FF00)",
+          background: spinning || totalWeight <= 0 ? "#888" : "linear-gradient(135deg, #FF00FF, #FFFF00, #00FF00)",
           color: "#000080",
           border: "4px solid #FF0000",
           boxShadow: "6px 6px 0 #0000FF, -2px -2px 0 #FF6600",
@@ -184,7 +210,6 @@ export default function Roulette({ slices }: RouletteProps) {
             boxShadow: "8px 8px 0 #00FF00, -4px -4px 0 #FF0000",
             color: "#FF0000",
             textDecoration: "underline",
-            animation: "none",
           }}
         >
           🎉 결과: <span style={{ color: "#0000FF", fontSize: "1.4em" }}>{result}</span> 🎉

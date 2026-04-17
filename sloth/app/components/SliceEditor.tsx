@@ -1,24 +1,47 @@
 "use client";
 
+export interface Slice {
+  label: string;
+  weight: number;
+}
+
 interface SliceEditorProps {
-  slices: string[];
-  onChange: (slices: string[]) => void;
+  slices: Slice[];
+  onChange: (slices: Slice[]) => void;
 }
 
 export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
-  const updateSlice = (idx: number, val: string) => {
+  const total = slices.reduce((s, x) => s + Math.max(0, x.weight), 0);
+
+  const updateLabel = (idx: number, val: string) => {
     const next = [...slices];
-    next[idx] = val;
+    next[idx] = { ...next[idx], label: val };
+    onChange(next);
+  };
+
+  const updateWeight = (idx: number, val: number) => {
+    const next = [...slices];
+    next[idx] = { ...next[idx], weight: isNaN(val) ? 0 : Math.max(0, val) };
     onChange(next);
   };
 
   const setCount = (n: number) => {
     if (n < 2 || n > 16) return;
     if (n > slices.length) {
-      onChange([...slices, ...Array.from({ length: n - slices.length }, (_, i) => `항목 ${slices.length + i + 1}`)]);
+      onChange([
+        ...slices,
+        ...Array.from({ length: n - slices.length }, (_, i) => ({
+          label: `항목 ${slices.length + i + 1}`,
+          weight: 1,
+        })),
+      ]);
     } else {
       onChange(slices.slice(0, n));
     }
+  };
+
+  const resetWeights = () => {
+    onChange(slices.map((s) => ({ ...s, weight: 1 })));
   };
 
   return (
@@ -45,7 +68,7 @@ export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
         ✏️ 조각 설정 ✏️
       </h2>
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-3">
         <label
           className="font-bold text-sm"
           style={{ color: "#000080", textDecoration: "underline" }}
@@ -92,32 +115,97 @@ export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
         </span>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {slices.map((s, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span
-              className="w-6 text-right font-bold text-sm shrink-0"
-              style={{ color: "#FF6600" }}
-            >
-              {i + 1}.
-            </span>
-            <input
-              type="text"
-              value={s}
-              onChange={(e) => updateSlice(i, e.target.value)}
-              className="flex-1 px-2 py-1 text-sm"
-              style={{
-                fontFamily: "'Comic Sans MS', cursive",
-                background: i % 2 === 0 ? "#FFFF00" : "#FF69B4",
-                border: "3px dashed #0000FF",
-                color: "#000080",
-                outline: "none",
-                boxShadow: "inset 2px 2px 0 #FF0000",
-              }}
-            />
-          </div>
-        ))}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex gap-3 text-xs font-bold" style={{ color: "#000080" }}>
+          <span style={{ width: "1.5rem" }}>#</span>
+          <span className="flex-1">항목</span>
+          <span style={{ width: "3.5rem" }}>가중치</span>
+          <span style={{ width: "2.5rem", textAlign: "right" }}>확률</span>
+        </div>
+        <button
+          onClick={resetWeights}
+          className="text-xs px-2 py-0.5 font-bold"
+          style={{
+            background: "#FFFF00",
+            color: "#FF0000",
+            border: "2px solid #000",
+            cursor: "pointer",
+          }}
+        >
+          균등
+        </button>
       </div>
+
+      <div className="flex flex-col gap-2">
+        {slices.map((s, i) => {
+          const w = Math.max(0, s.weight);
+          const pct = total > 0 ? Math.round((w / total) * 100) : 0;
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <span
+                className="w-6 text-right font-bold text-sm shrink-0"
+                style={{ color: "#FF6600" }}
+              >
+                {i + 1}.
+              </span>
+              <input
+                type="text"
+                value={s.label}
+                onChange={(e) => updateLabel(i, e.target.value)}
+                className="flex-1 px-2 py-1 text-sm min-w-0"
+                style={{
+                  fontFamily: "'Comic Sans MS', cursive",
+                  background: i % 2 === 0 ? "#FFFF00" : "#FF69B4",
+                  border: "3px dashed #0000FF",
+                  color: "#000080",
+                  outline: "none",
+                  boxShadow: "inset 2px 2px 0 #FF0000",
+                }}
+              />
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={s.weight}
+                onChange={(e) => updateWeight(i, parseFloat(e.target.value))}
+                className="px-1 py-1 text-sm text-center"
+                style={{
+                  width: "3.5rem",
+                  fontFamily: "'Comic Sans MS', cursive",
+                  background: "#00FFFF",
+                  border: "3px double #FF00FF",
+                  color: "#FF0000",
+                  outline: "none",
+                  fontWeight: "bold",
+                }}
+              />
+              <span
+                className="text-xs font-bold text-right"
+                style={{
+                  width: "2.5rem",
+                  color: "#FF0000",
+                  textShadow: "1px 1px #FFFF00",
+                }}
+              >
+                {pct}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {total <= 0 && (
+        <p
+          className="mt-3 text-xs text-center font-bold p-2"
+          style={{
+            background: "#FF0000",
+            color: "#FFFF00",
+            border: "2px dashed #000",
+          }}
+        >
+          ⚠️ 모든 가중치가 0입니다. 최소 1개 항목에 1 이상을 입력하세요!
+        </p>
+      )}
     </div>
   );
 }

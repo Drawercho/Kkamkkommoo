@@ -2,15 +2,21 @@
 
 import { useState } from "react";
 import Roulette from "./components/Roulette";
-import SliceEditor from "./components/SliceEditor";
+import SliceEditor, { Slice } from "./components/SliceEditor";
 
-const DEFAULT_SLICES = [
-  "항목 1", "항목 2", "항목 3", "항목 4",
-  "항목 5", "항목 6", "항목 7", "항목 8",
+const DEFAULT_SLICES: Slice[] = [
+  { label: "항목 1", weight: 1 },
+  { label: "항목 2", weight: 1 },
+  { label: "항목 3", weight: 1 },
+  { label: "항목 4", weight: 1 },
+  { label: "항목 5", weight: 1 },
+  { label: "항목 6", weight: 1 },
+  { label: "항목 7", weight: 1 },
+  { label: "항목 8", weight: 1 },
 ];
 
 export default function Home() {
-  const [slices, setSlices] = useState(DEFAULT_SLICES);
+  const [slices, setSlices] = useState<Slice[]>(DEFAULT_SLICES);
 
   return (
     <main
