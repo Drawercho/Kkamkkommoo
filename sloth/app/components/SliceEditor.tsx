@@ -1,5 +1,7 @@
 "use client";
 
+import type { ClipboardEvent } from "react";
+
 export interface Slice {
   label: string;
   weight: number;
@@ -44,6 +46,35 @@ export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
     onChange(slices.map((s) => ({ ...s, weight: 1 })));
   };
 
+  const MAX_SLICES = 16;
+
+  const handleLabelPaste = (
+    idx: number,
+    e: ClipboardEvent<HTMLInputElement>
+  ) => {
+    const text = e.clipboardData.getData("text");
+    if (!/\r|\n/.test(text)) return; // 한 줄이면 기본 붙여넣기 동작 사용
+
+    e.preventDefault();
+    const lines = text
+      .split(/\r\n|\r|\n/)
+      .map((line) => line.split("\t")[0].trim())
+      .filter((line) => line.length > 0);
+    if (lines.length === 0) return;
+
+    const next = [...slices];
+    lines.forEach((label, i) => {
+      const pos = idx + i;
+      if (pos >= MAX_SLICES) return;
+      if (pos < next.length) {
+        next[pos] = { ...next[pos], label };
+      } else {
+        next.push({ label, weight: 1 });
+      }
+    });
+    onChange(next);
+  };
+
   return (
     <div
       className="w-full max-w-sm p-4"
@@ -67,6 +98,13 @@ export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
       >
         ✏️ 조각 설정 ✏️
       </h2>
+
+      <p
+        className="text-xs text-center mb-3"
+        style={{ color: "#000080", fontFamily: "sans-serif" }}
+      >
+        💡 스프레드시트에서 이름을 여러 줄 복사해서 항목 칸에 붙여넣으면 한번에 채워져요
+      </p>
 
       <div className="flex items-center gap-2 mb-3">
         <label
@@ -152,6 +190,7 @@ export default function SliceEditor({ slices, onChange }: SliceEditorProps) {
                 type="text"
                 value={s.label}
                 onChange={(e) => updateLabel(i, e.target.value)}
+                onPaste={(e) => handleLabelPaste(i, e)}
                 className="flex-1 px-2 py-1 text-sm min-w-0"
                 style={{
                   fontFamily: "'Comic Sans MS', cursive",
