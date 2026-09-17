@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
+import type { PointerEvent } from "react";
 import type { Slice } from "./SliceEditor";
 
 const UGLY_COLORS = [
@@ -16,14 +17,25 @@ interface RouletteProps {
 
 export default function Roulette({ slices }: RouletteProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ledRingRef = useRef<HTMLDivElement>(null);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const rotationRef = useRef(0);
+  const cameraRef = useRef<HTMLDivElement>(null);
+  const busyRef = useRef(false);
+  const dragRef = useRef<{ id: number; angle: number; time: number; velocity: number; distance: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const wobble = (offset: number, tilt: number) => {
+    cameraRef.current?.style.setProperty("--rattle-x", `${offset}px`);
+    cameraRef.current?.style.setProperty("--rattle-tilt", `${tilt}deg`);
+  };
 
   const totalWeight = slices.reduce((s, x) => s + Math.max(0, x.weight), 0);
 
   const drawWheel = useCallback((rot: number) => {
+    if (ledRingRef.current) ledRingRef.current.style.transform = `rotate(${rot}rad)`;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -92,6 +104,15 @@ export default function Roulette({ slices }: RouletteProps) {
   }, [slices, totalWeight]);
 
   useEffect(() => {
+    // Editing the entries cancels the old draw/selection snapshot.
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    busyRef.current = false;
+    dragRef.current = null;
+    setDragging(false);
+    setSpinning(false);
+    setResult(null);
+    if (cameraRef.current) cameraRef.current.style.transform = "scale(1)";
+    wobble(0, 0);
     drawWheel(rotationRef.current);
   }, [drawWheel]);
 
@@ -107,9 +128,10 @@ export default function Roulette({ slices }: RouletteProps) {
     return slices.length - 1;
   };
 
-  const spin = () => {
-    if (spinning) return;
+  const spin = (velocity = 0.012) => {
+    if (busyRef.current) return;
     if (totalWeight <= 0) return;
+    busyRef.current = true;
     setResult(null);
     setSpinning(true);
 
@@ -125,32 +147,95 @@ export default function Roulette({ slices }: RouletteProps) {
 
     const pointerAngle = -Math.PI / 2;
     const startRot = rotationRef.current;
-    const extraSpins = 5 + Math.floor(Math.random() * 4);
+    const strength = Math.min(Math.abs(velocity) / 0.02, 1);
+    const direction = velocity < 0 ? -1 : 1;
+    const extraSpins = 4 + Math.floor(strength * 5);
     const baseFinalRot = pointerAngle - targetAngleInWheel;
-    const minFinal = startRot + extraSpins * 2 * Math.PI;
     const twoPi = 2 * Math.PI;
-    let finalRot = baseFinalRot;
-    while (finalRot < minFinal) finalRot += twoPi;
+    const offset = ((direction * (baseFinalRot - startRot)) % twoPi + twoPi) % twoPi;
+    const finalRot = startRot + direction * (extraSpins * twoPi + offset);
 
-    const duration = 3500 + Math.random() * 1000;
+    const duration = 4200 + strength * 1600;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const spinDuration = reducedMotion ? 250 : duration;
     const startTime = performance.now();
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
+      const progress = Math.min(elapsed / spinDuration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       const currentRot = startRot + (finalRot - startRot) * eased;
       rotationRef.current = currentRot;
       drawWheel(currentRot);
+      // Cosmetic loose axle only: selection and final angle remain unchanged.
+      const rattle = reducedMotion ? 0 : Math.sin(elapsed / 90) * (0.5 + progress * 1.1) * Math.min(progress * 12, 1);
+      wobble(rattle, rattle * 0.65);
+      const zoomProgress = Math.max(0, Math.min((progress - 0.55) / 0.45, 1));
+      const zoom = reducedMotion ? 1 : 1 + 1.2 * zoomProgress * zoomProgress * (3 - 2 * zoomProgress);
+      if (cameraRef.current) cameraRef.current.style.transform = `scale(${zoom})`;
 
       if (progress < 1) {
         animFrameRef.current = requestAnimationFrame(animate);
       } else {
-        setSpinning(false);
-        setResult(slices[targetIdx].label);
+        const revealStart = now;
+        const reveal = (time: number) => {
+          const settle = Math.min((time - revealStart) / 600, 1);
+          const kick = reducedMotion ? 0 : Math.sin(settle * Math.PI * 4) * (1 - settle) * 2;
+          wobble(kick, kick * 0.7);
+          const returnProgress = reducedMotion ? 1 : Math.min(Math.max((time - revealStart - 650) / 500, 0), 1);
+          if (cameraRef.current) cameraRef.current.style.transform = `scale(${1 + (zoom - 1) * (1 - returnProgress)})`;
+          if (returnProgress < 1) {
+            animFrameRef.current = requestAnimationFrame(reveal);
+          } else {
+            rotationRef.current = ((finalRot % twoPi) + twoPi) % twoPi;
+            busyRef.current = false;
+            setSpinning(false);
+            setResult(slices[targetIdx].label);
+          }
+        };
+        animFrameRef.current = requestAnimationFrame(reveal);
       }
     };
     animFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const pointerAngle = (event: PointerEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return Math.atan2(event.clientY - rect.top - rect.height / 2, event.clientX - rect.left - rect.width / 2);
+  };
+
+  const startDrag = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (busyRef.current || dragRef.current || totalWeight <= 0 || !event.isPrimary || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { id: event.pointerId, angle: pointerAngle(event), time: performance.now(), velocity: 0, distance: 0 };
+    setDragging(true);
+    setResult(null);
+  };
+
+  const moveDrag = (event: PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    const angle = pointerAngle(event);
+    const delta = Math.atan2(Math.sin(angle - drag.angle), Math.cos(angle - drag.angle));
+    const now = performance.now();
+    drag.velocity = delta / Math.max(now - drag.time, 8);
+    drag.distance += Math.abs(delta);
+    drag.angle = angle;
+    drag.time = now;
+    rotationRef.current += delta;
+    drawWheel(rotationRef.current);
+  };
+
+  const endDrag = (event: PointerEvent<HTMLCanvasElement>, cancelled = false) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!cancelled && drag.distance > 0.12) {
+      const velocity = drag.velocity * Math.max(0, 1 - (performance.now() - drag.time) / 180);
+      spin(velocity);
+    }
   };
 
   useEffect(() => {
@@ -161,7 +246,27 @@ export default function Roulette({ slices }: RouletteProps) {
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="relative" style={{ filter: "drop-shadow(0 0 12px #FF00FF) drop-shadow(0 0 6px #00FF00)" }}>
+      <p className="text-sm text-center">룰렛을 잡고 돌린 뒤 놓아보세요! 빠르게 돌릴수록 오래 돌아가요.</p>
+      <div style={{ width: "min(380px, 75vw)", overflow: "hidden", paddingTop: 24 }}>
+      <div ref={cameraRef} className="relative" style={{ transformOrigin: "50% 20px", willChange: "transform", filter: "drop-shadow(0 0 12px #FF00FF)" }}>
+        <div ref={ledRingRef} className="roulette-led-ring" data-active={spinning || dragging} aria-hidden="true">
+          <span className="roulette-tacky-hub">★</span>
+          {Array.from({ length: 32 }, (_, index) => {
+            const angle = (index / 32) * Math.PI * 2;
+            return (
+              <span
+                key={index}
+                className="roulette-led"
+                style={{
+                  left: `${50 + 47 * Math.sin(angle)}%`,
+                  top: `${50 - 47 * Math.cos(angle)}%`,
+                  color: ["#ff00ff", "#eaff00", "#00ffff", "#39ff14"][index % 4],
+                  animationDelay: `${-index * 0.15}s`,
+                }}
+              />
+            );
+          })}
+        </div>
         <div
           className="absolute left-1/2 z-10"
           style={{
@@ -179,13 +284,20 @@ export default function Roulette({ slices }: RouletteProps) {
           ref={canvasRef}
           width={380}
           height={380}
-          style={{ borderRadius: "50%", border: "5px dashed #FF6600" }}
+          aria-label="드래그해서 돌리는 룰렛. 아래 버튼으로도 돌릴 수 있습니다."
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={(event) => endDrag(event)}
+          onPointerCancel={(event) => endDrag(event, true)}
+          onLostPointerCapture={(event) => endDrag(event, true)}
+          style={{ width: "100%", height: "auto", display: "block", touchAction: "none", cursor: spinning ? "wait" : dragging ? "grabbing" : "grab", borderRadius: "50%", border: "5px dashed #FF6600" }}
         />
+      </div>
       </div>
 
       <button
-        onClick={spin}
-        disabled={spinning || totalWeight <= 0}
+        onClick={() => spin()}
+        disabled={spinning || dragging || totalWeight <= 0}
         className="px-8 py-3 text-2xl font-bold uppercase tracking-widest cursor-pointer"
         style={{
           fontFamily: "'Comic Sans MS', cursive",
@@ -202,6 +314,7 @@ export default function Roulette({ slices }: RouletteProps) {
 
       {result && (
         <div
+          role="status"
           className="mt-2 px-6 py-4 text-center text-xl font-bold"
           style={{
             fontFamily: "'Comic Sans MS', cursive",

@@ -4,3 +4,67 @@ body {
   margin: 0;
   padding: 0;
 }
+
+/* Cheap arcade bulbs rotate with the wheel; the prize pointer stays fixed. */
+.roulette-led-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 5px ridge #ffdf00;
+  box-shadow: inset 0 0 0 4px #ff00ff, inset 0 0 0 8px #00ffff, inset 0 0 18px 9px #ff00ff;
+}
+
+.roulette-led-ring,
+canvas[aria-label^="드래그"] {
+  translate: var(--rattle-x, 0px) 0;
+  rotate: var(--rattle-tilt, 0deg);
+}
+
+.roulette-led {
+  position: absolute;
+  width: 4.5%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 3px outset #fff59d;
+  background: radial-gradient(circle at 32% 28%, white 0 12%, currentColor 35% 65%, #48004d 100%);
+  box-shadow: 0 0 5px white, 0 0 10px currentColor;
+  opacity: 0.9;
+}
+
+.roulette-tacky-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  display: grid;
+  place-items: center;
+  width: 17%;
+  aspect-ratio: 1;
+  border: 6px ridge #ffd700;
+  border-radius: 50%;
+  background: repeating-conic-gradient(#ff00ff 0deg 30deg, #0000ff 30deg 60deg, #00ffff 60deg 90deg);
+  color: #ffff00;
+  font: 900 clamp(24px, 7vw, 40px) Georgia, serif;
+  text-shadow: 3px 3px #ff0000, -2px -2px white;
+  box-shadow: 0 0 0 3px #ff00ff, 0 0 15px #ffff00;
+}
+
+.roulette-led-ring[data-active="true"] .roulette-led {
+  animation: roulette-led-chase 2.4s ease-in-out infinite;
+}
+
+@keyframes roulette-led-chase {
+  0%, 100% { opacity: 0.8; box-shadow: 0 0 5px currentColor; }
+  35%, 55% { opacity: 1; box-shadow: 0 0 8px 2px white, 0 0 18px 5px currentColor, 0 0 30px 8px currentColor; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roulette-led-ring[data-active="true"] .roulette-led {
+    animation: none;
+    opacity: 1;
+    box-shadow: 0 0 6px currentColor;
+  }
+}
