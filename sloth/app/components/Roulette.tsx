@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import type { PointerEvent } from "react";
 import type { Slice } from "./SliceEditor";
+import { RouletteAudio } from "./rouletteAudio";
 
 const UGLY_COLORS = [
   "#FF00FF", "#00FF00", "#FF6600", "#0000FF",
@@ -26,6 +27,14 @@ export default function Roulette({ slices }: RouletteProps) {
   const busyRef = useRef(false);
   const dragRef = useRef<{ id: number; angle: number; time: number; velocity: number; distance: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const audioRef = useRef<RouletteAudio | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  const unlockAudio = () => {
+    audioRef.current ??= new RouletteAudio();
+    audioRef.current.enabled = soundEnabled;
+    audioRef.current.unlock();
+  };
 
   const wobble = (offset: number, tilt: number) => {
     cameraRef.current?.style.setProperty("--rattle-x", `${offset}px`);
@@ -107,6 +116,7 @@ export default function Roulette({ slices }: RouletteProps) {
     // Editing the entries cancels the old draw/selection snapshot.
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     busyRef.current = false;
+    audioRef.current?.stop();
     dragRef.current = null;
     setDragging(false);
     setSpinning(false);
@@ -131,6 +141,8 @@ export default function Roulette({ slices }: RouletteProps) {
   const spin = (velocity = 0.012) => {
     if (busyRef.current) return;
     if (totalWeight <= 0) return;
+    unlockAudio();
+    audioRef.current?.stop();
     busyRef.current = true;
     setResult(null);
     setSpinning(true);
@@ -159,10 +171,24 @@ export default function Roulette({ slices }: RouletteProps) {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const spinDuration = reducedMotion ? 250 : duration;
     const startTime = performance.now();
+    let nextBeep = 0;
+    let nextSqueak = 500;
+    let beepIndex = 0;
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / spinDuration, 1);
+      if (progress < 1 && !document.hidden) {
+        if (elapsed >= nextBeep) {
+          const note = [523, 784, 659, 1047][beepIndex++ % 4];
+          audioRef.current?.tone(note, note * 0.85, 0.06);
+          nextBeep = elapsed + 90 + progress * progress * 330;
+        }
+        if (elapsed >= nextSqueak) {
+          audioRef.current?.squeak();
+          nextSqueak = elapsed + 650 + Math.random() * 650;
+        }
+      }
       const eased = 1 - Math.pow(1 - progress, 3);
       const currentRot = startRot + (finalRot - startRot) * eased;
       rotationRef.current = currentRot;
@@ -178,6 +204,8 @@ export default function Roulette({ slices }: RouletteProps) {
         animFrameRef.current = requestAnimationFrame(animate);
       } else {
         const revealStart = now;
+        audioRef.current?.stop();
+        if (!document.hidden) audioRef.current?.tone(130, 45, 0.15, "triangle", 0.05);
         const reveal = (time: number) => {
           const settle = Math.min((time - revealStart) / 600, 1);
           const kick = reducedMotion ? 0 : Math.sin(settle * Math.PI * 4) * (1 - settle) * 2;
@@ -191,6 +219,7 @@ export default function Roulette({ slices }: RouletteProps) {
             busyRef.current = false;
             setSpinning(false);
             setResult(slices[targetIdx].label);
+            if (!document.hidden) audioRef.current?.win();
           }
         };
         animFrameRef.current = requestAnimationFrame(reveal);
@@ -207,6 +236,7 @@ export default function Roulette({ slices }: RouletteProps) {
   const startDrag = (event: PointerEvent<HTMLCanvasElement>) => {
     if (busyRef.current || dragRef.current || totalWeight <= 0 || !event.isPrimary || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    unlockAudio();
     dragRef.current = { id: event.pointerId, angle: pointerAngle(event), time: performance.now(), velocity: 0, distance: 0 };
     setDragging(true);
     setResult(null);
@@ -241,12 +271,29 @@ export default function Roulette({ slices }: RouletteProps) {
   useEffect(() => {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      audioRef.current?.dispose();
     };
   }, []);
 
   return (
     <div className="flex flex-col items-center gap-4">
       <p className="text-sm text-center">룰렛을 잡고 돌린 뒤 놓아보세요! 빠르게 돌릴수록 오래 돌아가요.</p>
+      <button
+        type="button"
+        aria-pressed={soundEnabled}
+        onClick={() => {
+          const enabled = !soundEnabled;
+          setSoundEnabled(enabled);
+          audioRef.current ??= new RouletteAudio();
+          audioRef.current.enabled = enabled;
+          if (enabled) audioRef.current.unlock();
+          else audioRef.current.stop();
+        }}
+        className="px-3 py-1 text-sm font-bold"
+        style={{ background: "#ffff00", color: "#000080", border: "3px outset #ff00ff" }}
+      >
+        {soundEnabled ? "🔊 오락실 소리 켜짐" : "🔇 오락실 소리 꺼짐"}
+      </button>
       <div style={{ width: "min(380px, 75vw)", overflow: "hidden", paddingTop: 24 }}>
       <div ref={cameraRef} className="relative" style={{ transformOrigin: "50% 20px", willChange: "transform", filter: "drop-shadow(0 0 12px #FF00FF)" }}>
         <div ref={ledRingRef} className="roulette-led-ring" data-active={spinning || dragging} aria-hidden="true">
